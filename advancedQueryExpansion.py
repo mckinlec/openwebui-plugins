@@ -28,6 +28,10 @@ class Pipeline:
         """
         Transforms query with dynamic context-aware prompting.
         """
+        print(f"\n[DEBUG] Starting {transform_type} transformation for query:")
+        print(f"Original Query: {query}")
+        print(f"Context: {context}")
+
         logger.debug(f"Starting {transform_type} transformation for query: {query} with context: {context}")
 
         # Base system message for LLM
@@ -61,6 +65,8 @@ class Pipeline:
 
         logger.debug(f"{transform_type} transformation payload:\n{json.dumps(payload, indent=2)}")
 
+        print(f"[DEBUG] {transform_type} Payload Sent to LLM:\n{json.dumps(payload, indent=2)}")
+
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=payload) as response:
@@ -71,6 +77,8 @@ class Pipeline:
 
                         # Clean and return the response
                         cleaned_response = raw_response.strip("```").strip()
+                        print(f"[DEBUG] Raw Response from LLM:\n{raw_response}")
+                        print(f"[DEBUG] Cleaned Response:\n{cleaned_response}")
                         logger.info(f"Transformation result [{transform_type}]:\n{cleaned_response}")
                         return cleaned_response
         except Exception as e:
@@ -81,6 +89,7 @@ class Pipeline:
         """
         Processes user input by expanding the query using the Ollama model.
         """
+        print(f"[INFO] Received inlet request with body:\n{json.dumps(body, indent=2)}")
         logger.info(f"Received inlet request with body: {json.dumps(body, indent=2)}")
 
         # Ensure the body is a dictionary
@@ -93,6 +102,7 @@ class Pipeline:
         if user_message:
             # Log the original user query
             logger.info(f"Original user query: {user_message}")
+            print(f"[INFO] Original User Query: {user_message}")
 
             # Perform query transformation
             expanded_query = await self.query_transform(
@@ -103,6 +113,7 @@ class Pipeline:
 
             # Log the expanded query
             logger.info(f"Expanded query result:\n{expanded_query}")
+            print(f"[INFO] Expanded Query Result:\n{expanded_query}")
 
             # Update the last user message with the expanded query
             for message in reversed(body.get("messages", [])):
