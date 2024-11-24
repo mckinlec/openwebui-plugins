@@ -1,6 +1,6 @@
 """
 title: Ollama Query Expansion Pipeline
-author: Your Name
+author: Chris M
 date: 2024-11-23
 version: 1.0
 license: MIT
@@ -19,14 +19,14 @@ class Pipeline:
         pipelines: List[str] = []
         priority: int = 0
         ollama_base_url: str = "http://ollama:11434"  # Default URL for Ollama
-        expansion_model: str = "phi3:14b"  # Replace with your model's name
+        expansion_model: str = "llama3.2"  # Replace with your model's name
 
     def __init__(self):
         self.type = "filter"
         self.name = "Ollama Query Expansion Filter"
         self.valves = self.Valves(
             **{
-                "pipelines": ["*"],  # Connect to all pipelines
+                "pipelines": ["ihsgpt"],  # Connect to all pipelines
             }
         )
 
