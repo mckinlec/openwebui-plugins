@@ -1,10 +1,10 @@
 """
-title: Ollama Advanced Query Pipeline
+title: Refined Query Optimization Pipeline
 author: Christopher McKinley
 date: 2024-11-23
-version: 1.0
+version: 1.1
 license: MIT
-description: A pipeline for dynamically expanding or decomposing queries using an Ollama model.
+description: A pipeline for refining and optimizing queries using an Ollama model.
 requirements: pydantic, aiohttp
 """
 
@@ -23,7 +23,7 @@ class Pipeline:
 
     def __init__(self):
         self.type = "filter"
-        self.name = "Ollama Advanced Query Filter"
+        self.name = "Refined Query Optimization Filter"
         self.valves = self.Valves(
             **{
                 "pipelines": ["ihsgpt"],  # Target pipelines
@@ -38,17 +38,18 @@ class Pipeline:
         print(f"on_shutdown:{__name__}")
         pass
 
-    async def process_query_with_ollama(self, query: str, ollama_base_url: str, expansion_model: str) -> str:
+    async def optimize_query_with_ollama(self, query: str, ollama_base_url: str, expansion_model: str) -> str:
         """
-        Calls the Ollama model to either expand or decompose the query.
+        Calls the Ollama model to optimize the query.
         """
         url = f"{ollama_base_url}/api/chat"
-        system_message = """You are an advanced AI for query optimization.
-Your task is to determine the best approach for this query:
-1. Expand the query with synonyms and related terms if it is vague or broad.
-2. Decompose the query into 2-4 specific sub-questions if it is complex or multifaceted.
-Choose the best approach based on the query and respond only with the result. Do not include any explanation or metadata."""
-
+        system_message = """You are an expert in query optimization. Your goal is to improve the user's query for better information retrieval.
+        
+        Tasks:
+        1. If the query is vague or broad, expand it using synonyms, related terms, and clarifying phrases.
+        2. If the query is complex or multifaceted, decompose it into 2-4 specific sub-questions.
+        3. Your response must ONLY contain the expanded or decomposed query. Do not include explanations, emojis, or additional commentary.
+        """
         payload = {
             "model": expansion_model,
             "messages": [
@@ -85,7 +86,7 @@ Choose the best approach based on the query and respond only with the result. Do
         # Process query if a valid user message exists
         if user_message:
             print(f"Original query: {user_message}")
-            optimized_query = await self.process_query_with_ollama(
+            optimized_query = await self.optimize_query_with_ollama(
                 query=user_message,
                 ollama_base_url=self.valves.ollama_base_url,
                 expansion_model=self.valves.expansion_model
