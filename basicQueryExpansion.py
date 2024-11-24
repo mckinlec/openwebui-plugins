@@ -1,10 +1,10 @@
 """
-title: Ollama Query Expansion Pipeline
-author: Your Name
+title: Ollama Advanced Query Pipeline
+author: Christopher McKinley
 date: 2024-11-23
 version: 1.0
 license: MIT
-description: A pipeline for expanding queries dynamically using an Ollama model.
+description: A pipeline for dynamically expanding or decomposing queries using an Ollama model.
 requirements: pydantic, aiohttp
 """
 
@@ -23,10 +23,10 @@ class Pipeline:
 
     def __init__(self):
         self.type = "filter"
-        self.name = "Ollama Query Expansion Filter"
+        self.name = "Ollama Advanced Query Filter"
         self.valves = self.Valves(
             **{
-                "pipelines": ["ihsgpt"],  # Connect to all pipelines
+                "pipelines": ["ihsgpt"],  # Target pipelines
             }
         )
 
@@ -38,18 +38,22 @@ class Pipeline:
         print(f"on_shutdown:{__name__}")
         pass
 
-    async def expand_query_with_ollama(self, query: str, ollama_base_url: str, expansion_model: str) -> str:
+    async def process_query_with_ollama(self, query: str, ollama_base_url: str, expansion_model: str) -> str:
         """
-        Calls the Ollama model to expand the query.
+        Calls the Ollama model to either expand or decompose the query.
         """
         url = f"{ollama_base_url}/api/chat"
+        system_message = """You are an advanced AI for query optimization.
+Your task is to determine the best approach for this query:
+1. Expand the query with synonyms and related terms if it is vague or broad.
+2. Decompose the query into 2-4 specific sub-questions if it is complex or multifaceted.
+Choose the best approach based on the query and respond only with the result. Do not include any explanation or metadata."""
+
         payload = {
             "model": expansion_model,
             "messages": [
-                {
-                    "role": "user",
-                    "content": f"Expand the following query with synonyms and related terms: {query}"
-                }
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": f"Query: {query}"}
             ]
         }
 
@@ -60,14 +64,14 @@ class Pipeline:
                     async for line in response.content:
                         data = json.loads(line)
                         content.append(data.get("message", {}).get("content", ""))
-                    return "".join(content)
+                    return "".join(content).strip()
                 else:
-                    print(f"Failed to expand query with Ollama, status code: {response.status}")
+                    print(f"Failed to process query with Ollama, status code: {response.status}")
                     return query  # Fallback to the original query
 
     async def inlet(self, body: dict, user: Optional[dict] = None) -> dict:
         """
-        Processes user input by expanding the query using the Ollama model.
+        Processes user input by optimizing the query using the Ollama model.
         """
         print(f"inlet:{__name__}")
 
@@ -78,19 +82,20 @@ class Pipeline:
         # Extract user query
         user_message = get_last_user_message(body.get("messages", []))
 
-        # Expand query if a valid user message exists
+        # Process query if a valid user message exists
         if user_message:
-            expanded_query = await self.expand_query_with_ollama(
+            print(f"Original query: {user_message}")
+            optimized_query = await self.process_query_with_ollama(
                 query=user_message,
                 ollama_base_url=self.valves.ollama_base_url,
                 expansion_model=self.valves.expansion_model
             )
-            print(f"Expanded query: {expanded_query}")
+            print(f"Optimized query: {optimized_query}")
 
-            # Update the last user message with the expanded query
+            # Update the last user message with the optimized query
             for message in reversed(body.get("messages", [])):
                 if message["role"] == "user":
-                    message["content"] = expanded_query
+                    message["content"] = optimized_query
                     break
 
         return body
