@@ -1,11 +1,10 @@
 """
-title: Refined Query Optimization Pipeline
-author: Christopher McKinley
-date: 2024-11-23
-version: 1.1
+title: Simplified Query Expansion Pipeline
+author: Your Name
+date: 2024-11-24
+version: 1.0
 license: MIT
-description: A pipeline for refining and optimizing queries using an Ollama model.
-requirements: pydantic, aiohttp
+description: A streamlined pipeline for expanding or decomposing queries using an Ollama model.
 """
 
 from typing import List, Optional
@@ -18,45 +17,48 @@ class Pipeline:
     class Valves(BaseModel):
         pipelines: List[str] = []
         priority: int = 0
-        ollama_base_url: str = "http://ollama:11434"  # Default URL for Ollama
-        expansion_model: str = "llama3.2"  # Replace with your model's name
+        ollama_base_url: str = "http://ollama:11434"
+        expansion_model: str = "llama3.2"
 
     def __init__(self):
         self.type = "filter"
-        self.name = "Refined Query Optimization Filter"
+        self.name = "Simplified Query Expansion Filter"
         self.valves = self.Valves(
             **{
-                "pipelines": ["ihsgpt"],  # Target pipelines
+                "pipelines": ["ihsgpt"],
             }
         )
 
-    async def on_startup(self):
-        print(f"on_startup:{__name__}")
-        pass
-
-    async def on_shutdown(self):
-        print(f"on_shutdown:{__name__}")
-        pass
-
-    async def optimize_query_with_ollama(self, query: str, ollama_base_url: str, expansion_model: str) -> str:
+    async def process_query_with_ollama(self, query: str, history: Optional[List[dict]], ollama_base_url: str, expansion_model: str) -> str:
         """
-        Calls the Ollama model to optimize the query.
+        Calls the Ollama model to process the query.
         """
         url = f"{ollama_base_url}/api/chat"
-        system_message = """You are an expert in query optimization. Your goal is to improve the user's query for better information retrieval.
+        system_message = """You are an expert in query optimization. Based on the complexity of the query:
         
-        Tasks:
-        1. If the query is vague or broad, expand it using synonyms, related terms, and clarifying phrases.
-        2. If the query is complex or multifaceted, decompose it into 2-4 specific sub-questions.
-        3. Your response must ONLY contain the expanded or decomposed query. Do not include explanations, emojis, or additional commentary.
+        1. If the query is broad or vague, expand it with synonyms and related terms.
+        2. If the query is complex or multifaceted, decompose it into 2-4 concise sub-queries.
+        3. Respond ONLY with the expanded or decomposed query. Do not include explanations or additional commentary.
         """
+        messages = [{"role": "system", "content": system_message}]
+        
+        # Add query to the payload
+        messages.append({"role": "user", "content": f"Query: {query}"})
+        
+        # Add chat history if available
+        if history:
+            history_content = "\n".join([f"{entry['role']}: {entry['content']}" for entry in history])
+            messages.append({"role": "user", "content": f"Chat history:\n{history_content}"})
+            print(f"Chat history included:\n{history_content}")
+        else:
+            print("No chat history included.")
+
         payload = {
             "model": expansion_model,
-            "messages": [
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": f"Query: {query}"}
-            ]
+            "messages": messages
         }
+
+        print(f"Sending payload to Ollama:\n{json.dumps(payload, indent=2)}")
 
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload) as response:
@@ -65,29 +67,32 @@ class Pipeline:
                     async for line in response.content:
                         data = json.loads(line)
                         content.append(data.get("message", {}).get("content", ""))
-                    return "".join(content).strip()
+                    result = "".join(content).strip()
+                    print(f"Received response from Ollama:\n{result}")
+                    return result
                 else:
-                    print(f"Failed to process query with Ollama, status code: {response.status}")
+                    print(f"Failed to process query. HTTP status: {response.status}")
                     return query  # Fallback to the original query
 
     async def inlet(self, body: dict, user: Optional[dict] = None) -> dict:
         """
         Processes user input by optimizing the query using the Ollama model.
         """
-        print(f"inlet:{__name__}")
+        print("Inlet function called")
 
         # Ensure the body is a dictionary
         if isinstance(body, str):
             body = json.loads(body)
         
-        # Extract user query
+        # Extract user query and history
         user_message = get_last_user_message(body.get("messages", []))
-
-        # Process query if a valid user message exists
+        chat_history = body.get("messages", [])[:-1] if "messages" in body else None
+        
         if user_message:
             print(f"Original query: {user_message}")
-            optimized_query = await self.optimize_query_with_ollama(
+            optimized_query = await self.process_query_with_ollama(
                 query=user_message,
+                history=chat_history,
                 ollama_base_url=self.valves.ollama_base_url,
                 expansion_model=self.valves.expansion_model
             )
@@ -105,4 +110,5 @@ class Pipeline:
         """
         Optionally processes assistant messages or other output if needed.
         """
+        print("Outlet function called")
         return body
