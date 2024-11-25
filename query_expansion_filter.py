@@ -14,7 +14,7 @@ class Pipeline:
         pipelines: List[str] = []
         priority: int = 0
         ollama_base_url: str = "http://ollama:11434"
-        expansion_model: str = "llama3.2"  # Restored to llama3.2
+        expansion_model: str = "llama3.2"
 
     def __init__(self):
         self.type = "filter"
@@ -29,6 +29,8 @@ class Pipeline:
         """
         Uses llama3.2 to expand the query for better RAG retrieval.
         """
+        print(f"Original query: {query}")
+        
         system_prompt = """You are an expert in query optimization. Based on the complexity of the query:
         
 1. If the query is broad or vague, expand it with synonyms and related terms.
@@ -44,13 +46,18 @@ class Pipeline:
             ]
         }
 
+        print("Sending payload to Ollama:")
+        print(json.dumps(payload, indent=2))
+
         async with aiohttp.ClientSession() as session:
             async with session.post(f"{self.valves.ollama_base_url}/api/chat", json=payload) as response:
+                print(f"Received response from Ollama with status: {response.status}")
                 if response.status == 200:
                     expanded = ""
                     async for line in response.content:
                         data = json.loads(line)
                         expanded += data.get("message", {}).get("content", "")
+                    print(f"Optimized query: {expanded.strip()}")
                     return expanded.strip()
                 return query
 
@@ -61,9 +68,11 @@ class Pipeline:
         print(f"inlet:{__name__}")
 
         if isinstance(body, str):
+            print("Converting body from string to dict")
             body = json.loads(body)
         
         user_message = get_last_user_message(body.get("messages", []))
+        print(f"Extracted user message: {user_message}")
 
         if user_message:
             expanded_query = await self.expand_query(user_message)
@@ -73,6 +82,7 @@ class Pipeline:
             for message in reversed(body.get("messages", [])):
                 if message["role"] == "user":
                     message["content"] = expanded_query
+                    print("Updated message content with expanded query")
                     break
 
         return body
@@ -81,4 +91,5 @@ class Pipeline:
         """
         Pass-through for responses.
         """
+        print("Outlet function called")
         return body
