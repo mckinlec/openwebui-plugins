@@ -2,7 +2,7 @@
 title: Ollama Query Expansion Pipeline
 author: Your Name
 date: 2024-11-24
-version: 1.1
+version: 1.2
 license: MIT
 description: A pipeline for expanding user queries dynamically using the Ollama API.
 requirements: pydantic, aiohttp, requests
@@ -78,6 +78,7 @@ class Pipeline:
             response.raise_for_status()
             data = response.json()
 
+            # Extract expanded content from the API response
             expanded_query = "".join(
                 [msg.get("message", {}).get("content", "") for msg in data]
             )
@@ -99,17 +100,22 @@ class Pipeline:
             print("No user message to process.")
             return body
 
+        # Ensure user_message is a dictionary, not a string
+        if isinstance(user_message, str):
+            user_message = {"content": user_message}
+
         original_query = user_message.get("content", "")
         print(f"Original query: {original_query}")
 
-        expanded_query = self.expand_query(original_query)
-        print(f"Expanded query: {expanded_query}")
+        if original_query:
+            expanded_query = self.expand_query(original_query)
+            print(f"Expanded query: {expanded_query}")
 
-        # Update the last user message with the expanded query
-        for message in reversed(messages):
-            if message["role"] == "user":
-                message["content"] = expanded_query
-                break
+            # Update the last user message with the expanded query
+            for message in reversed(messages):
+                if message["role"] == "user":
+                    message["content"] = expanded_query
+                    break
 
         body["messages"] = messages
         return body
