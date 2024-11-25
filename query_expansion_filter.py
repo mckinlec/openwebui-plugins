@@ -1,8 +1,8 @@
 """
 title: Query Expansion Pipeline
-author: Erica
+author: Chris
 date: 2024-11-24
-version: 1.0
+version: 1.1
 license: MIT
 description: A pipeline for expanding user queries using llama3.2 via the Ollama API before passing them to ihsgpt.
 requirements: pydantic, aiohttp
@@ -16,7 +16,7 @@ from utils.pipelines.main import get_last_user_message
 
 class Pipeline:
     class Valves(BaseModel):
-        pipelines: List[str] = ["ihsgpt"]  
+        pipelines: List[str] = ["ihsgpt"]  # Connect specifically to ihsgpt
         priority: int = 0
         ollama_base_url: str = "http://localhost:11434"  # Base URL for Ollama API
         expansion_model: str = "llama3.2"  # Model to use for query expansion
@@ -62,8 +62,12 @@ class Pipeline:
                 if response.status == 200:
                     expanded_query = []
                     async for line in response.content:
-                        data = json.loads(line)
-                        expanded_query.append(data.get("message", {}).get("content", ""))
+                        try:
+                            data = json.loads(line)
+                            expanded_query.append(data.get("message", {}).get("content", ""))
+                        except json.JSONDecodeError as e:
+                            print(f"Error decoding JSON: {e}")
+                            continue
                     return "".join(expanded_query).strip()
                 else:
                     print(f"Failed to expand query, status code: {response.status}")
@@ -77,16 +81,35 @@ class Pipeline:
 
         # Ensure the body is a dictionary
         if isinstance(body, str):
-            body = json.loads(body)
+            try:
+                body = json.loads(body)
+            except json.JSONDecodeError as e:
+                print(f"Error decoding body JSON: {e}")
+                return body  # Return as-is if body cannot be parsed
         
+        if not isinstance(body, dict):
+            print("Error: `body` is not a dictionary.")
+            return body
+
         model = body.get("model", "")
         if model != "ihsgpt":
+            print(f"Skipping query expansion for model: {model}")
             return body  # Skip processing if the model isn't ihsgpt
 
+        # Validate the structure of `body["messages"]`
+        messages = body.get("messages", [])
+        if not isinstance(messages, list):
+            print("Error: `messages` is not a list.")
+            return body
+
         # Get the user's query
-        user_message = get_last_user_message(body["messages"])
+        user_message = get_last_user_message(messages)
         if user_message:
-            original_query = user_message["content"]
+            original_query = user_message.get("content", "")
+            if not isinstance(original_query, str):
+                print("Error: User message content is not a string.")
+                return body
+
             print(f"Original query: {original_query}")
 
             # Expand the query using llama3.2
@@ -98,10 +121,12 @@ class Pipeline:
             print(f"Expanded query: {expanded_query}")
 
             # Update the user's query in the message history
-            for message in body["messages"]:
-                if message["role"] == "user":
+            for message in messages:
+                if message.get("role") == "user":
                     message["content"] = expanded_query
                     break
+
+            body["messages"] = messages
 
         return body
 
