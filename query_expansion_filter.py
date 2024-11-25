@@ -16,7 +16,7 @@ from utils.pipelines.main import get_last_user_message
 
 class Pipeline:
     class Valves(BaseModel):
-        pipelines: List[str] = []  
+        pipelines: List[str] = ["ihsgpt"]  
         priority: int = 0
         ollama_base_url: str = "http://localhost:11434"  # Base URL for Ollama API
         expansion_model: str = "llama3.2"  # Model to use for query expansion
