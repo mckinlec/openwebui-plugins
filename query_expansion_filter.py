@@ -1,11 +1,6 @@
 """
-title: Ollama Query Expansion Pipeline
-author: Your Name
-date: 2024-11-23
-version: 1.0
-license: MIT
-description: A pipeline for expanding queries dynamically using an Ollama model.
-requirements: pydantic, aiohttp
+title: Simple RAG Query Expansion Filter
+description: A streamlined query expansion pipeline using llama3.2 for RAG optimization
 """
 
 from typing import List, Optional
@@ -18,73 +13,60 @@ class Pipeline:
     class Valves(BaseModel):
         pipelines: List[str] = []
         priority: int = 0
-        ollama_base_url: str = "http://ollama:11434"  # Default URL for Ollama
-        expansion_model: str = "phi3:14b"  # Replace with your model's name
+        ollama_base_url: str = "http://ollama:11434"
+        expansion_model: str = "llama3.2"  # Restored to llama3.2
 
     def __init__(self):
         self.type = "filter"
-        self.name = "Ollama Query Expansion Filter"
+        self.name = "Simple RAG Query Expansion"
         self.valves = self.Valves(
             **{
-                "pipelines": ["*"],  # Connect to all pipelines
+                "pipelines": ["*"],
             }
         )
 
-    async def on_startup(self):
-        print(f"on_startup:{__name__}")
-        pass
-
-    async def on_shutdown(self):
-        print(f"on_shutdown:{__name__}")
-        pass
-
-    async def expand_query_with_ollama(self, query: str, ollama_base_url: str, expansion_model: str) -> str:
+    async def expand_query(self, query: str) -> str:
         """
-        Calls the Ollama model to expand the query.
+        Uses llama3.2 to expand the query for better RAG retrieval.
         """
-        url = f"{ollama_base_url}/api/chat"
+        system_prompt = """You are an expert in query optimization. Based on the complexity of the query:
+        
+1. If the query is broad or vague, expand it with synonyms and related terms.
+2. If the query is complex or multifaceted, decompose it into 2-4 concise sub-queries.
+3. Respond ONLY with the expanded or decomposed query. Do not include explanations or additional commentary.
+        """
+
         payload = {
-            "model": expansion_model,
+            "model": self.valves.expansion_model,
             "messages": [
-                {
-                    "role": "user",
-                    "content": f"Expand the following query with synonyms and related terms: {query}"
-                }
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Query: {query}"}
             ]
         }
 
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload) as response:
+            async with session.post(f"{self.valves.ollama_base_url}/api/chat", json=payload) as response:
                 if response.status == 200:
-                    content = []
+                    expanded = ""
                     async for line in response.content:
                         data = json.loads(line)
-                        content.append(data.get("message", {}).get("content", ""))
-                    return "".join(content)
-                else:
-                    print(f"Failed to expand query with Ollama, status code: {response.status}")
-                    return query  # Fallback to the original query
+                        expanded += data.get("message", {}).get("content", "")
+                    return expanded.strip()
+                return query
 
     async def inlet(self, body: dict, user: Optional[dict] = None) -> dict:
         """
-        Processes user input by expanding the query using the Ollama model.
+        Processes user input by expanding the query using llama3.2.
         """
         print(f"inlet:{__name__}")
 
-        # Ensure the body is a dictionary
         if isinstance(body, str):
             body = json.loads(body)
         
-        # Extract user query
         user_message = get_last_user_message(body.get("messages", []))
 
-        # Expand query if a valid user message exists
         if user_message:
-            expanded_query = await self.expand_query_with_ollama(
-                query=user_message,
-                ollama_base_url=self.valves.ollama_base_url,
-                expansion_model=self.valves.expansion_model
-            )
+            expanded_query = await self.expand_query(user_message)
             print(f"Expanded query: {expanded_query}")
 
             # Update the last user message with the expanded query
@@ -97,6 +79,6 @@ class Pipeline:
 
     async def outlet(self, body: dict, user: Optional[dict] = None) -> dict:
         """
-        Optionally processes assistant messages or other output if needed.
+        Pass-through for responses.
         """
         return body
