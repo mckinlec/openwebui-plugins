@@ -10,7 +10,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 import json
 import aiohttp
-from utils.pipelines.main import get_last_user_message, get_last_assistant_message
+from utils.pipelines.main import get_last_user_message
 
 class Pipeline:
     class Valves(BaseModel):
@@ -34,17 +34,13 @@ class Pipeline:
         """
         print(f"📥 Original query: {query}")
         
-        system_prompt = """You are an expert at expanding search queries to improve retrieval.
-For the given query, add relevant concepts, synonyms and related terms in natural language.
-Avoid using boolean operators (AND, OR) and parentheses.
-Focus on adding relevant terms and phrases that help capture the full meaning.
-Respond ONLY with the expanded query in natural language."""
+        system_prompt = """You are an expert at expanding search queries. For the given query, add relevant concepts, synonyms and related terms while keeping the query natural and readable. Focus on adding terms that would help retrieve relevant information."""
 
         payload = {
             "model": self.valves.expansion_model,
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Query: {query}"}
+                {"role": "user", "content": f"Expand this query: {query}"}
             ]
         }
 
@@ -60,30 +56,18 @@ Respond ONLY with the expanded query in natural language."""
                     return expanded
                 return query
 
-    def is_system_message(self, message: str) -> bool:
-        """Check if this is a system/internal message that should be ignored."""
-        if not message:
-            return True
-        return (
-            message.startswith("###") or
-            message.startswith("{") or
-            "```" in message or
-            "Task:" in message
-        )
-
     async def inlet(self, body: dict, user: Optional[dict] = None) -> dict:
         """
         Expands user queries using llama3.2 before they go to the main LLM.
         """
         print(f"inlet:{__name__}")
-
         messages = body.get("messages", [])
         user_message = get_last_user_message(messages)
         
-        if user_message and not self.is_system_message(user_message):
+        if user_message and not any(x in user_message for x in ["###", "{", "```", "Task:"]):
             expanded_query = await self.expand_query(user_message)
             
-            # Update the last user message with the expanded query
+            # Update the last user message with expanded query
             for message in reversed(messages):
                 if message["role"] == "user":
                     message["content"] = expanded_query
@@ -95,7 +79,6 @@ Respond ONLY with the expanded query in natural language."""
 
     async def outlet(self, body: dict, user: Optional[dict] = None) -> dict:
         """
-        Pass-through for the main LLM's responses.
+        Simple pass-through for responses.
         """
-        print(f"outlet:{__name__}")
         return body
