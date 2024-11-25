@@ -2,40 +2,31 @@
 title: Ollama Query Expansion Pipeline
 author: Your Name
 date: 2024-11-24
-version: 1.2
+version: 1.4
 license: MIT
-description: A pipeline for expanding user queries dynamically using the Ollama API.
-requirements: pydantic, aiohttp, requests
+description: A pipeline for dynamically expanding user queries using the Ollama API.
+requirements: pydantic, aiohttp
 """
 
 from typing import List, Optional
-from schemas import OpenAIChatMessage
 from pydantic import BaseModel
-import requests
-import os
-
-from utils.pipelines.main import get_last_user_message, get_last_assistant_message
-
+import json
+import aiohttp
+from utils.pipelines.main import get_last_user_message
 
 class Pipeline:
     class Valves(BaseModel):
-        # List target pipeline ids (models) that this filter will be connected to
-        pipelines: List[str] = ["ihsgpt"]
-
-        # Assign a priority level to the filter pipeline.
+        pipelines: List[str] = ["ihsgpt"]  # Only expand queries for the 'ihsgpt' model
         priority: int = 0
-
-        # Ollama-specific configurations
-        OLLAMA_API_BASE_URL: str = "http://ollama:11434"
-        EXPANSION_MODEL: str = "llama3.2"
+        expansion_model: str = "llama3.2"
+        ollama_base_url: str = "http://ollama:11434"
 
     def __init__(self):
-        # Filter pipeline configuration
         self.type = "filter"
         self.name = "Ollama Query Expansion Filter"
         self.valves = self.Valves(
             **{
-                "pipelines": ["ihsgpt"],  # Target ihsgpt specifically
+                "pipelines": ["ihsgpt"],  # Target specific pipelines
             }
         )
 
@@ -45,17 +36,13 @@ class Pipeline:
     async def on_shutdown(self):
         print(f"on_shutdown:{__name__}")
 
-    async def on_valves_updated(self):
-        # This function is called when the valves are updated.
-        pass
-
-    def expand_query(self, query: str) -> str:
+    async def expand_query_with_ollama(self, query: str, expansion_model: str, ollama_base_url: str) -> str:
         """
         Calls the Ollama API to expand the user query with synonyms and related terms.
         """
-        headers = {"Content-Type": "application/json"}
+        url = f"{ollama_base_url}/api/chat"
         payload = {
-            "model": self.valves.EXPANSION_MODEL,
+            "model": expansion_model,
             "messages": [
                 {
                     "role": "system",
@@ -65,64 +52,63 @@ class Pipeline:
                     "role": "user",
                     "content": query
                 },
-            ],
+            ]
         }
 
-        try:
-            response = requests.post(
-                url=f"{self.valves.OLLAMA_API_BASE_URL}/api/chat",
-                json=payload,
-                headers=headers,
-                timeout=10,
-            )
-            response.raise_for_status()
-            data = response.json()
-
-            # Extract expanded content from the API response
-            expanded_query = "".join(
-                [msg.get("message", {}).get("content", "") for msg in data]
-            )
-            return expanded_query.strip() if expanded_query else query
-        except Exception as e:
-            print(f"Failed to expand query: {e}")
-            return query  # Fallback to the original query
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.post(url, json=payload) as response:
+                    if response.status == 200:
+                        content = []
+                        async for line in response.content:
+                            data = json.loads(line)
+                            content.append(data.get("message", {}).get("content", ""))
+                        return "".join(content).strip()
+                    else:
+                        print(f"Failed to expand query, status code: {response.status}")
+                        return query  # Return original query if expansion fails
+            except Exception as e:
+                print(f"Error while calling Ollama API: {e}")
+                return query  # Fallback to original query in case of error
 
     async def inlet(self, body: dict, user: Optional[dict] = None) -> dict:
         """
-        Process user input by expanding the query using the Ollama API.
+        Processes user input by expanding the query before it is sent to the LLM.
         """
         print(f"inlet:{__name__}")
+
+        # Ensure the body is a dictionary
+        if isinstance(body, str):
+            body = json.loads(body)
 
         messages = body.get("messages", [])
         user_message = get_last_user_message(messages)
 
         if not user_message:
-            print("No user message to process.")
+            print("No user message found for query expansion.")
             return body
 
-        # Ensure user_message is a dictionary, not a string
-        if isinstance(user_message, str):
-            user_message = {"content": user_message}
+        # Expand the user's query
+        print(f"Original query: {user_message}")
+        expanded_query = await self.expand_query_with_ollama(
+            query=user_message,
+            expansion_model=self.valves.expansion_model,
+            ollama_base_url=self.valves.ollama_base_url
+        )
+        print(f"Expanded query: {expanded_query}")
 
-        original_query = user_message.get("content", "")
-        print(f"Original query: {original_query}")
-
-        if original_query:
-            expanded_query = self.expand_query(original_query)
-            print(f"Expanded query: {expanded_query}")
-
-            # Update the last user message with the expanded query
-            for message in reversed(messages):
-                if message["role"] == "user":
-                    message["content"] = expanded_query
-                    break
+        # Update the user's message with the expanded query
+        for message in reversed(messages):
+            if message["role"] == "user":
+                message["content"] = expanded_query
+                break
 
         body["messages"] = messages
         return body
 
     async def outlet(self, body: dict, user: Optional[dict] = None) -> dict:
         """
-        Optionally process assistant messages or other output if needed.
+        Processes output from the LLM if needed. Currently passes data through without modification.
         """
         print(f"outlet:{__name__}")
         return body
