@@ -1,8 +1,16 @@
+"""
+title: Query Expansion Filter
+author: Claude
+date: 2024-11-24
+version: 1.0
+description: A filter pipeline that expands queries using llama3.2 for better RAG retrieval.
+"""
+
 from typing import List, Optional
 from pydantic import BaseModel
 import json
 import aiohttp
-from utils.pipelines.main import get_last_user_message
+from utils.pipelines.main import get_last_user_message, get_last_assistant_message
 
 class Pipeline:
     class Valves(BaseModel):
@@ -24,15 +32,13 @@ class Pipeline:
         """
         Uses llama3.2 to expand the query for better RAG retrieval.
         """
-        print("=== QUERY EXPANSION PIPELINE ===")
-        print(f"📥 ORIGINAL QUERY: {query}")
+        print(f"📥 Original query: {query}")
         
-        system_prompt = """You are an expert in query optimization. Based on the complexity of the query:
-        
-1. If the query is broad or vague, expand it with synonyms and related terms.
-2. If the query is complex or multifaceted, decompose it into 2-4 concise sub-queries.
-3. Respond ONLY with the expanded or decomposed query. Do not include explanations or additional commentary.
-        """
+        system_prompt = """You are an expert at expanding search queries to improve retrieval.
+For the given query, add relevant concepts, synonyms and related terms in natural language.
+Avoid using boolean operators (AND, OR) and parentheses.
+Focus on adding relevant terms and phrases that help capture the full meaning.
+Respond ONLY with the expanded query in natural language."""
 
         payload = {
             "model": self.valves.expansion_model,
@@ -49,14 +55,13 @@ class Pipeline:
                     async for line in response.content:
                         data = json.loads(line)
                         expanded += data.get("message", {}).get("content", "")
-                    print(f"🔄 EXPANDED QUERY: {expanded.strip()}")
-                    return expanded.strip()
+                    expanded = expanded.strip()
+                    print(f"🔄 Expanded query: {expanded}")
+                    return expanded
                 return query
 
     def is_system_message(self, message: str) -> bool:
-        """
-        Check if this is a system/internal message that should be ignored.
-        """
+        """Check if this is a system/internal message that should be ignored."""
         if not message:
             return True
         return (
@@ -70,34 +75,27 @@ class Pipeline:
         """
         Expands user queries using llama3.2 before they go to the main LLM.
         """
-        print("⚡ INLET FUNCTION CALLED")
-        
-        if isinstance(body, str):
-            body = json.loads(body)
+        print(f"inlet:{__name__}")
 
-        user_message = get_last_user_message(body.get("messages", []))
+        messages = body.get("messages", [])
+        user_message = get_last_user_message(messages)
         
-        # Skip processing if:
-        # 1. No user message
-        # 2. It's a system message
-        # 3. It looks like an already expanded query
-        if (user_message and 
-            not self.is_system_message(user_message) and
-            not any(x in user_message for x in ["OR", "AND", "(", ")", "`"])):
-            
+        if user_message and not self.is_system_message(user_message):
             expanded_query = await self.expand_query(user_message)
             
             # Update the last user message with the expanded query
-            for message in reversed(body.get("messages", [])):
+            for message in reversed(messages):
                 if message["role"] == "user":
                     message["content"] = expanded_query
                     break
 
+            body = {**body, "messages": messages}
+        
         return body
 
     async def outlet(self, body: dict, user: Optional[dict] = None) -> dict:
         """
         Pass-through for the main LLM's responses.
         """
-        print("🔚 OUTLET FUNCTION CALLED")
+        print(f"outlet:{__name__}")
         return body
