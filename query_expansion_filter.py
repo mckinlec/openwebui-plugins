@@ -1,11 +1,3 @@
-"""
-title: Query Expansion Filter Pipeline
-author: Claude
-date: 2024-11-24
-version: 1.0
-description: A filter pipeline that expands queries using llama3.2 for better RAG retrieval.
-"""
-
 from typing import List, Optional
 from pydantic import BaseModel
 import json
@@ -28,17 +20,12 @@ class Pipeline:
             }
         )
 
-    async def on_startup(self):
-        print(f"on_startup:{__name__}")
-
-    async def on_shutdown(self):
-        print(f"on_shutdown:{__name__}")
-
     async def expand_query(self, query: str) -> str:
         """
         Uses llama3.2 to expand the query for better RAG retrieval.
         """
-        print(f"QUERY-EXPANSION | Original Query: {query}")
+        print("=== QUERY EXPANSION PIPELINE ===")
+        print(f"📥 ORIGINAL QUERY: {query}")
         
         system_prompt = """You are an expert in query optimization. Based on the complexity of the query:
         
@@ -62,30 +49,42 @@ class Pipeline:
                     async for line in response.content:
                         data = json.loads(line)
                         expanded += data.get("message", {}).get("content", "")
-                    print(f"QUERY-EXPANSION | Expanded Query: {expanded.strip()}")
+                    print(f"🔄 EXPANDED QUERY: {expanded.strip()}")
                     return expanded.strip()
                 return query
+
+    def is_system_message(self, message: str) -> bool:
+        """
+        Check if this is a system/internal message that should be ignored.
+        """
+        if not message:
+            return True
+        return (
+            message.startswith("###") or
+            message.startswith("{") or
+            "```" in message or
+            "Task:" in message
+        )
 
     async def inlet(self, body: dict, user: Optional[dict] = None) -> dict:
         """
         Expands user queries using llama3.2 before they go to the main LLM.
         """
-        print(f"inlet:{__name__}")
-
-        required_keys = ["messages"]
-        missing_keys = [key for key in required_keys if key not in body]
+        print("⚡ INLET FUNCTION CALLED")
         
-        if missing_keys:
-            print(f"Error: Missing keys in request body: {', '.join(missing_keys)}")
-            return body
-
         if isinstance(body, str):
             body = json.loads(body)
-        
+
         user_message = get_last_user_message(body.get("messages", []))
         
-        # Only process actual user queries, not system messages or JSON
-        if user_message and not (user_message.startswith("###") or user_message.startswith("{")):
+        # Skip processing if:
+        # 1. No user message
+        # 2. It's a system message
+        # 3. It looks like an already expanded query
+        if (user_message and 
+            not self.is_system_message(user_message) and
+            not any(x in user_message for x in ["OR", "AND", "(", ")", "`"])):
+            
             expanded_query = await self.expand_query(user_message)
             
             # Update the last user message with the expanded query
@@ -100,5 +99,5 @@ class Pipeline:
         """
         Pass-through for the main LLM's responses.
         """
-        print(f"outlet:{__name__}")
+        print("🔚 OUTLET FUNCTION CALLED")
         return body
